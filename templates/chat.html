@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ArogyaBot BD - AI Health Assistant</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Markdown-it for rendering bot responses that might contain markdown -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/markdown-it/12.3.2/markdown-it.min.js"></script>
+    <style>
+        #chatbox::-webkit-scrollbar { width: 8px; }
+        #chatbox::-webkit-scrollbar-track { background: #f1f1f1; }
+        #chatbox::-webkit-scrollbar-thumb { background: #a0aec0; border-radius: 4px;} /* Tailwind gray-500 */
+        #chatbox::-webkit-scrollbar-thumb:hover { background: #718096; } /* Tailwind gray-600 */
+        
+        .bot-message, .user-message {
+            padding: 0.75rem; /* p-3 */
+            border-radius: 0.5rem; /* rounded-lg */
+            max-width: 75%; /* Limit width */
+            word-wrap: break-word; /* Break long words */
+            box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06); /* shadow-md */
+            line-height: 1.5;
+        }
+        .user-message {
+            background-color: #3B82F6; /* bg-blue-500 */
+            color: white;
+            margin-left: auto; /* Align right */
+        }
+        .bot-message {
+            background-color: #E5E7EB; /* bg-gray-200 */
+            color: #1F2937; /* text-gray-800 */
+            margin-right: auto; /* Align left */
+        }
+        .bot-message strong { color: #1D4ED8; } /* text-blue-700 for emphasis */
+        .bot-message em { color: #4B5563; } /* text-gray-600 for italics */
+        .bot-message ul { list-style-type: disc; margin-left: 1.5rem; }
+        .bot-message img { max-width: 100%; border-radius: 0.25rem; margin-top: 0.5rem; }
+    </style>
+</head>
+<body class="bg-gray-100 flex flex-col items-center justify-center min-h-screen p-2 sm:p-4 font-sans">
+    <div class="w-full max-w-lg md:max-w-2xl bg-white shadow-xl rounded-lg flex flex-col" style="height: 90vh; min-height: 500px;">
+        <header class="bg-blue-600 text-white p-3 sm:p-4 rounded-t-lg flex items-center justify-between shadow-md">
+            <div class="flex items-center">
+                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-8 h-8 mr-2 text-blue-200">
+                    <path d="M12 2C6.477 2 2 6.477 2 12S6.477 22 12 22 22 17.523 22 12 17.523 2 12 2ZM12 4C16.418 4 20 7.582 20 12S16.418 20 12 20 4 16.418 4 12 7.582 4 12 4Z" fill-opacity="0.4"></path>
+                    <path d="M12.75 7C12.75 6.58579 12.4142 6.25 12 6.25C11.5858 6.25 11.25 6.58579 11.25 7V11.25H7C6.58579 11.25 6.25 11.5858 6.25 12C6.25 12.4142 6.58579 12.75 7 12.75H11.25V17C11.25 17.4142 11.5858 17.75 12 17.75C12.4142 17.75 12.75 17.4142 12.75 17V12.75H17C17.4142 12.75 17.75 12.4142 17.75 12C17.75 11.5858 17.4142 11.25 17 11.25H12.75V7Z"></path>
+                </svg>
+                <h1 class="text-lg sm:text-xl font-semibold">ArogyaBot BD</h1>
+            </div>
+            <button id="resetButton" title="Start Over"
+                    class="bg-red-500 hover:bg-red-600 text-white font-semibold py-1 px-3 rounded-md text-xs sm:text-sm transition-colors duration-150">
+                Reset Chat
+            </button>
+        </header>
+
+        <div id="chatbox" class="flex-1 p-3 sm:p-4 overflow-y-auto space-y-3 bg-gray-50">
+            <!-- Chat messages appear here -->
+        </div>
+        
+        <div class="p-2 bg-gray-100 border-t text-xs text-gray-500 text-center">
+           <span class="hidden sm:inline">Type "help symptoms" for examples or </span> "reset" to start over.
+        </div>
+
+        <footer class="bg-white p-2 sm:p-3 border-t border-gray-200 rounded-b-lg">
+            <div class="flex items-center space-x-2">
+                <input type="text" id="userInput" placeholder="Describe symptoms or reply..."
+                       class="flex-1 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none text-sm sm:text-base"
+                       autocomplete="off">
+                <button id="sendButton"
+                        class="bg-blue-500 hover:bg-blue-600 text-white font-semibold py-3 px-4 sm:px-5 rounded-lg transition-colors duration-150 text-sm sm:text-base">
+                    Send
+                </button>
+            </div>
+        </footer>
+    </div>
+
+<script>
+    const chatbox = document.getElementById('chatbox');
+    const userInput = document.getElementById('userInput');
+    const sendButton = document.getElementById('sendButton');
+    const resetButton = document.getElementById('resetButton');
+    const md = window.markdownit({html: true, linkify: true, typographer: true});
+
+    let currentUserId = localStorage.getItem('arogyaBotUserId');
+    if (!currentUserId) {
+        currentUserId = 'user_' + Date.now() + Math.random().toString(36).substring(2, 9);
+        localStorage.setItem('arogyaBotUserId', currentUserId);
+    }
+    console.log("Current User ID:", currentUserId);
+
+
+    function addMessage(messageContent, sender) {
+        const messageWrapper = document.createElement('div');
+        messageWrapper.classList.add('w-full', 'flex');
+
+        const messageDiv = document.createElement('div');
+        // Apply base classes from CSS for .user-message and .bot-message
+        if (sender === 'user') {
+            messageWrapper.classList.add('justify-end');
+            messageDiv.classList.add('user-message');
+            messageDiv.textContent = messageContent; // User messages are plain text
+        } else { // Bot or system
+            messageWrapper.classList.add('justify-start');
+            messageDiv.classList.add('bot-message');
+            // Render markdown for bot messages, allowing rich content
+            messageDiv.innerHTML = md.render(messageContent);
+        }
+        messageWrapper.appendChild(messageDiv);
+        chatbox.appendChild(messageWrapper);
+        // Scroll to the bottom smoothly
+        chatbox.scrollTo({ top: chatbox.scrollHeight, behavior: 'smooth' });
+    }
+
+    async function sendMessageToBot(messageText) {
+        const trimmedMessage = messageText.trim();
+        if (!trimmedMessage) return;
+
+        addMessage(trimmedMessage, 'user');
+        userInput.value = ''; // Clear input
+        sendButton.disabled = true;
+        sendButton.innerHTML = `<svg class="animate-spin h-5 w-5 text-white mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>`;
+
+
+        try {
+            const response = await fetch('/chat_api', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: trimmedMessage, user_id: currentUserId })
+            });
+            const data = await response.json();
+
+            if (data.bot_response_parts && Array.isArray(data.bot_response_parts)) {
+                for (const part of data.bot_response_parts) {
+                    addMessage(part, 'bot');
+                     // Small delay for more natural multi-part message flow
+                    await new Promise(resolve => setTimeout(resolve, trimmedMessage === "reset" ? 50 : 300));
+                }
+            } else if (data.error) {
+                 addMessage(`Error: ${data.error}`, 'bot');
+            }
+            // User ID might be confirmed or re-assigned by server, though unlikely with localStorage client-side generation
+            // if (data.user_id) currentUserId = data.user_id; 
+            
+        } catch (error) {
+            console.error("API Error:", error);
+            addMessage("Sorry, I'm having trouble connecting right now. Please try again in a moment.", 'bot');
+        } finally {
+            sendButton.disabled = false;
+            sendButton.textContent = 'Send';
+            userInput.focus();
+        }
+    }
+
+    sendButton.addEventListener('click', () => sendMessageToBot(userInput.value));
+    userInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) { // Send on Enter, allow Shift+Enter for newline
+            e.preventDefault(); // Prevent default newline in textarea
+            sendMessageToBot(userInput.value);
+        }
+    });
+
+    resetButton.addEventListener('click', () => {
+        // Provide immediate visual feedback by clearing the chatbox locally
+        chatbox.innerHTML = ''; 
+        addMessage("Chat session is being reset...", 'bot');
+        // Then send the "reset" command to the backend to clear server-side session
+        sendMessageToBot("reset"); 
+    });
+
+    // Initial greeting message from the bot will be handled by the first API call if session is new.
+    // Or, you can trigger an initial "hello" message to the bot to get its first prompt.
+    // For this setup, we let the user type first or rely on backend to initiate if it needs info like name.
+    // To ensure the bot starts the convo when the page loads with a new session:
+    async function initiateChat() {
+        // This will effectively send an empty message or a predefined "init" message
+        // which the backend can use to trigger its AWAITING_NAME state if the session is new.
+        // Or better, let the backend prompt for name if session is new.
+        // So, the very first message will be the user typing their name or symptoms.
+        // The backend will guide from there.
+        addMessage("Hello! I'm ArogyaBot. To get started, please tell me your name, or describe your symptoms.", 'bot');
+        userInput.focus();
+    }
+    
+    initiateChat();
+
+</script>
+</body>
+</html>
