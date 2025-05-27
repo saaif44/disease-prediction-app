@@ -8,7 +8,7 @@ import re
 from fuzzywuzzy import process, fuzz # For NLP-like symptom extraction
 
 app = Flask(__name__)
-app.secret_key = os.urandom(24) # For Flask sessions, though we are using a simple dict now
+app.secret_key = os.urandom(24)
 
 # --- Configuration & Paths ---
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
@@ -16,25 +16,20 @@ MODEL_DIR = os.path.join(BASE_DIR, 'models')
 MODEL_PATH = os.path.join(MODEL_DIR, 'disease_prediction_model.pkl')
 SYMPTOM_COLUMNS_PATH = os.path.join(MODEL_DIR, 'symptom_columns.pkl')
 
-# Data files assumed to be in the same directory as app.py for simplicity
 DOCTORS_CSV_PATH = os.path.join(BASE_DIR, 'doctors_bd_detailed.csv')
 DISEASE_DESC_CSV_PATH = os.path.join(BASE_DIR, 'symptom_Description.csv')
 DISEASE_PRECAUTION_CSV_PATH = os.path.join(BASE_DIR, 'symptom_precaution.csv')
 
 # --- Global Variables for Loaded Data ---
 model = None
-MODEL_SYMPTOM_KEYS = [] # Ground truth symptom keys for the model
+MODEL_SYMPTOM_KEYS = []
 doctors_df = pd.DataFrame()
 disease_desc_df = pd.DataFrame()
 disease_precaution_df = pd.DataFrame()
 
 # --- SYMPTOM MAP (CRITICAL: Populate this thoroughly!) ---
-# Keys: Natural language phrases (lowercase) for fuzzy matching.
-# Values: dict with 'model_key' (matching MODEL_SYMPTOM_KEYS) and 'ask_phrase'.
-# This SYMPTOM_MAP should replace the one in your app.py
-
 SYMPTOM_MAP = {
-    # --- Primary Symptoms from your list ---
+    # ... (your existing SYMPTOM_MAP - keep it as is) ...
     "itching": {"model_key": "itching", "ask_phrase": "Are you experiencing any itching?"},
     "skin rash": {"model_key": "skin_rash", "ask_phrase": "Do you have a skin rash or any rashes on your skin?"},
     "nodal skin eruptions": {"model_key": "nodal_skin_eruptions", "ask_phrase": "Have you noticed any nodal skin eruptions, like bumps under the skin?"},
@@ -184,15 +179,12 @@ SYMPTOM_MAP = {
     "feeling down": {"model_key": "depression", "ask_phrase": "Are you feeling down or depressed?"},
     "peeing a lot": {"model_key": "polyuria", "ask_phrase": "Are you urinating much more frequently or in larger amounts?"},
 }
-MODEL_KEY_TO_ASK_PHRASE = {} # Populated after MODEL_SYMPTOM_KEYS is loaded
-NATURAL_SYMPTOM_PHRASES_FOR_FUZZY = [] # Populated after SYMPTOM_MAP is defined
 
+MODEL_KEY_TO_ASK_PHRASE = {}
+NATURAL_SYMPTOM_PHRASES_FOR_FUZZY = []
 
 
 def initialize_app_data():
-
-    
-
     global model, MODEL_SYMPTOM_KEYS, doctors_df, disease_desc_df, disease_precaution_df
     global MODEL_KEY_TO_ASK_PHRASE, NATURAL_SYMPTOM_PHRASES_FOR_FUZZY
 
@@ -205,76 +197,79 @@ def initialize_app_data():
         MODEL_SYMPTOM_KEYS = [key.strip().lower().replace(' ', '_') for key in MODEL_SYMPTOM_KEYS]
         app.logger.info(f"Model and {len(MODEL_SYMPTOM_KEYS)} symptom keys loaded.")
 
-
-        # >>>>>>>>>> INSERT THE VERIFICATION BLOCK HERE <<<<<<<<<<
-        # Verify all model_keys in SYMPTOM_MAP are in MODEL_SYMPTOM_KEYS
-        # This ensures that SYMPTOM_MAP only contains entries whose 'model_key'
-        # actually exists in the list of symptoms the ML model was trained on.
-
         app.logger.info(f"Verifying SYMPTOM_MAP against {len(MODEL_SYMPTOM_KEYS)} model keys...")
-        valid_symptom_map_natural_phrases = [] # Store the natural phrase keys that are valid
-        
-        # Create a new dictionary for the validated SYMPTOM_MAP to avoid modifying while iterating
         validated_symptom_map_temp = {}
+        valid_symptom_map_natural_phrases = [] # Not used directly later, but good for debugging
 
         for natural_phrase, details in SYMPTOM_MAP.items():
-            # Ensure 'model_key' exists in details and is a string before lowercasing etc.
             model_key_in_map = details.get("model_key")
             if not isinstance(model_key_in_map, str):
                  app.logger.warning(f"SymptomMap Integrity Issue: Entry for '{natural_phrase}' has no 'model_key' or it's not a string. Skipping.")
                  continue
-
             normalized_model_key_in_map = model_key_in_map.strip().lower().replace(' ', '_')
-
             if normalized_model_key_in_map not in MODEL_SYMPTOM_KEYS:
                 app.logger.warning(f"SymptomMap Error: model_key '{normalized_model_key_in_map}' (from phrase '{natural_phrase}') not found in loaded MODEL_SYMPTOM_KEYS. Skipping this entry.")
             else:
-                # If the model_key in SYMPTOM_MAP wasn't already normalized, update it.
-                # This ensures consistency if you manually typed a model_key with spaces/caps in SYMPTOM_MAP.
-                details["model_key"] = normalized_model_key_in_map 
+                details["model_key"] = normalized_model_key_in_map
                 validated_symptom_map_temp[natural_phrase] = details
                 valid_symptom_map_natural_phrases.append(natural_phrase)
         
-        # Replace the global SYMPTOM_MAP with the validated and cleaned one
         SYMPTOM_MAP.clear()
         SYMPTOM_MAP.update(validated_symptom_map_temp)
-        # <<<<<<<<<< VERIFICATION BLOCK ENDS HERE >>>>>>>>>>
+        # No need for the second verification block, it's redundant now.
 
-        # Verify all model_keys in SYMPTOM_MAP are in MODEL_SYMPTOM_KEYS
-        valid_symptom_map_keys = []
-        for natural_phrase, details in SYMPTOM_MAP.items():
-            if details["model_key"] not in MODEL_SYMPTOM_KEYS:
-                app.logger.warning(f"SymptomMap Error: model_key '{details['model_key']}' for phrase '{natural_phrase}' not found in loaded MODEL_SYMPTOM_KEYS. Skipping this entry.")
-            else:
-                valid_symptom_map_keys.append(natural_phrase)
-        
-        # Rebuild SYMPTOM_MAP with only valid entries
-        temp_symptom_map = {k: SYMPTOM_MAP[k] for k in valid_symptom_map_keys}
-        SYMPTOM_MAP.clear()
-        SYMPTOM_MAP.update(temp_symptom_map)
-
-        MODEL_KEY_TO_ASK_PHRASE = {details["model_key"]: details["ask_phrase"] 
+        MODEL_KEY_TO_ASK_PHRASE = {details["model_key"]: details["ask_phrase"]
                                    for details in SYMPTOM_MAP.values() if details["model_key"] in MODEL_SYMPTOM_KEYS}
         NATURAL_SYMPTOM_PHRASES_FOR_FUZZY = list(SYMPTOM_MAP.keys())
         app.logger.info(f"SYMPTOM_MAP processed: {len(SYMPTOM_MAP)} natural phrases, {len(MODEL_KEY_TO_ASK_PHRASE)} model key ask phrases.")
 
     except FileNotFoundError:
         app.logger.error(f"CRITICAL: Model or symptom_columns.pkl not found in {MODEL_DIR}.")
-        model = None # Ensure app knows model isn't loaded
+        model = None
     except Exception as e:
         app.logger.error(f"CRITICAL Error initializing model/symptom keys: {e}")
         model = None
 
     try:
+        # Ensure latitude and longitude are numeric, coercing errors to NaN
         doctors_df = pd.read_csv(DOCTORS_CSV_PATH, dtype={'number': str})
         doctors_df.columns = doctors_df.columns.str.strip().str.lower().str.replace(' ', '_')
+        
+        # Assuming your CSV has 'latitude' and 'longitude' columns
+        # If they have different names (like 'latitude_deg', 'longitude_deg'), adjust here.
+        # Also, the CSV header might have spaces, so we use the already cleaned column names.
+        # Let's assume after cleaning, the columns are 'latitude' and 'longitude'
+        
+        # Get the actual cleaned column names for lat/lon
+        # Example: if original CSV header was "Latitude (Deg)", it becomes "latitude_(deg)"
+        # For your example, it seems they are just "latitude" and "longitude" which is good.
+        lat_col_name = 'latitude' # Adjust if your CSV header is different after cleaning
+        lon_col_name = 'longitude'# Adjust if your CSV header is different after cleaning
+
+        if lat_col_name in doctors_df.columns:
+            doctors_df[lat_col_name] = pd.to_numeric(doctors_df[lat_col_name], errors='coerce')
+        else:
+            app.logger.warning(f"Latitude column '{lat_col_name}' not found in doctors CSV.")
+            doctors_df[lat_col_name] = np.nan # Add an empty column if not present
+
+        if lon_col_name in doctors_df.columns:
+            doctors_df[lon_col_name] = pd.to_numeric(doctors_df[lon_col_name], errors='coerce')
+        else:
+            app.logger.warning(f"Longitude column '{lon_col_name}' not found in doctors CSV.")
+            doctors_df[lon_col_name] = np.nan # Add an empty column if not present
+
         doctors_df['about'] = doctors_df['about'].fillna('N/A')
         doctors_df['image_source'] = doctors_df['image_source'].fillna('https://via.placeholder.com/100?text=No+Image')
-        app.logger.info(f"Doctors data loaded from {DOCTORS_CSV_PATH}")
+        app.logger.info(f"Doctors data loaded from {DOCTORS_CSV_PATH}. Shape: {doctors_df.shape}")
+        app.logger.info(f"Doctors DF columns: {doctors_df.columns.tolist()}")
+        # Log a few rows with lat/lon to check
+        app.logger.info(doctors_df[[doc_name_col if 'doc_name_col' in locals() else 'name', lat_col_name, lon_col_name]].head())
+
+
     except Exception as e:
         app.logger.error(f"Error loading doctors data {DOCTORS_CSV_PATH}: {e}")
+        doctors_df = pd.DataFrame() # Ensure it's an empty DataFrame on error
 
-    # Load disease descriptions and precautions
     for path, df_name, global_var_name in [
         (DISEASE_DESC_CSV_PATH, "Disease Descriptions", "disease_desc_df"),
         (DISEASE_PRECAUTION_CSV_PATH, "Disease Precautions", "disease_precaution_df")
@@ -290,12 +285,13 @@ def initialize_app_data():
                 app.logger.error(f"'disease' column not found in {path}")
         except Exception as e:
             app.logger.warning(f"Could not load {df_name} from {path}: {e}")
-            globals()[global_var_name] = pd.DataFrame() # Ensure it's an empty DataFrame
+            globals()[global_var_name] = pd.DataFrame()
 
-initialize_app_data() # Load all data when app starts
+initialize_app_data()
 
 # --- Disease to Specialization Map ---
-disease_to_specialization_map = { 
+disease_to_specialization_map = {
+    # ... (your existing map - keep it as is) ...
     "fungal infection": "Dermatologist", "allergy": "Allergist", "gerd": "Gastroenterologist",
     "chronic cholestasis": "Hepatologist", "drug reaction": "Dermatologist",
     "peptic ulcer diseae": "Gastroenterologist", "aids": "Infectious Disease Specialist",
@@ -314,18 +310,14 @@ disease_to_specialization_map = {
     "osteoarthristis": "Orthopedist", "arthritis": "Rheumatologist",
     "(vertigo) paroymsal positional vertigo": "ENT Specialist", "acne": "Dermatologist",
     "urinary tract infection": "Urologist", "psoriasis": "Dermatologist", "impetigo": "Dermatologist",
-    # Add more mappings as per your disease list and available doctor specializations
 }
-
-    
-
 
 def normalize_text(text):
     return str(text).strip().lower() if pd.notna(text) else ""
 
-
 # --- NLP Symptom Extraction Helper ---
 def extract_initial_symptoms_nlp(user_text, symptom_map_config_dict, natural_phrases_list_for_fuzzy, threshold=80):
+    # ... (your existing function - keep as is) ...
     identified_model_symptoms = set()
     user_text_lower = user_text.lower()
     if not user_text_lower: return []
@@ -345,10 +337,11 @@ def extract_initial_symptoms_nlp(user_text, symptom_map_config_dict, natural_phr
 
 
 # --- Targeted Symptom Questioning Strategy ---
-MIN_SYMPTOMS_FOR_PREDICTION = 4 # Adjust as needed
-MAX_QUESTIONS_PER_ROUND = 2 # Ask fewer questions per round
+MIN_SYMPTOMS_FOR_PREDICTION = 4
+MAX_QUESTIONS_PER_ROUND = 2
 
 def determine_next_symptoms_to_ask(symptoms_vector_dict, all_model_symptom_keys, ml_model, symptom_map_config_dict, count=MAX_QUESTIONS_PER_ROUND):
+    # ... (your existing function - keep as is) ...
     confirmed_positive_keys = [k for k,v in symptoms_vector_dict.items() if v == 1]
     already_addressed_keys = list(symptoms_vector_dict.keys()) # All keys for which we have a 0 or 1
 
@@ -357,23 +350,19 @@ def determine_next_symptoms_to_ask(symptoms_vector_dict, all_model_symptom_keys,
         if details["model_key"] not in already_addressed_keys or symptoms_vector_dict[details["model_key"]] == 0 # not confirmed positive
                                                               # or simply not addressed yet at all
     ]
-    # Filter to get unique model keys to ask about
     unique_unasked_model_keys = list(set(d["model_key"] for d in unasked_symptoms_details))
     
-    # A more advanced strategy would use feature importances of the `ml_model` 
-    # or co-occurrence statistics if `confirmed_positive_keys` exist.
-    # For now, a simpler approach:
     if not unique_unasked_model_keys: return []
 
     import random
     random.shuffle(unique_unasked_model_keys)
     return unique_unasked_model_keys[:count]
 
-
 # --- In-memory Session Store ---
-user_sessions = {} # Cleared on app restart
+user_sessions = {}
 
 def get_session(user_id):
+    # ... (your existing function - keep as is) ...
     if user_id not in user_sessions:
         app.logger.info(f"New session for user_id: {user_id}")
         user_sessions[user_id] = {
@@ -387,6 +376,7 @@ def get_session(user_id):
     return user_sessions[user_id]
 
 def reset_session_for_new_query(user_id, existing_name=None):
+    # ... (your existing function - keep as is) ...
     user_sessions[user_id] = {
         'state': 'AWAITING_INITIAL_SYMPTOMS' if existing_name else 'AWAITING_NAME', # If name known, ask for symptoms
         'user_name': existing_name,
@@ -397,7 +387,6 @@ def reset_session_for_new_query(user_id, existing_name=None):
         'age': None, 'sex': None, 'predicted_disease_context': None
     }
     return user_sessions[user_id]
-
 
 # --- Flask Routes ---
 @app.route('/')
@@ -415,11 +404,13 @@ def chat_api():
 
     session = get_session(user_id)
     bot_responses = []
+    map_data_for_frontend = None # NEW: To hold doctor data for the map
     current_state = session['state']
     user_name_greet = f"{session['user_name']}, " if session['user_name'] else ""
 
     app.logger.info(f"ID:{user_id}, Name:{session['user_name']}, State:{current_state}, Msg:'{user_message}'")
 
+    # ... (your existing state machine logic for AWAITING_NAME up to AWAITING_SEX)
     # Universal commands
     if user_message in ["reset", "start over"]:
         session = reset_session_for_new_query(user_id) # Resets and gets the new session
@@ -485,9 +476,9 @@ def chat_api():
                             ask_phrase = MODEL_KEY_TO_ASK_PHRASE.get(session['current_targeted_symptom_key'], f"Do you also have {session['current_targeted_symptom_key'].replace('_',' ')}?")
                             bot_responses.append(ask_phrase + " (yes/no)")
                             session['state'] = 'TARGETED_QUESTIONING'
-                        else:
-                            bot_responses.append(user_name_greet + "Okay. For formality, what is your age?")
-                            session['state'] = 'AWAITING_AGE'
+                        else: # Not enough symptoms and no more to ask from list
+                            bot_responses.append(user_name_greet + "I need a bit more information. Are there any other symptoms at all, even minor ones?")
+                            session['state'] = 'AWAITING_INITIAL_SYMPTOMS' # Go back to gather more
                     else:
                         bot_responses.append(user_name_greet + "Thanks. For our records, what is your age?")
                         session['state'] = 'AWAITING_AGE'
@@ -511,11 +502,16 @@ def chat_api():
 
             if responded:
                 session['current_targeted_symptom_key'] = None
-                if session['symptoms_targeted_questions_q'] and session['symptoms_confirmed_count'] < (MIN_SYMPTOMS_FOR_PREDICTION + 1): # Ask one more if available & needed
+                # Ask one more if available & still below min+1 (or some other threshold)
+                if session['symptoms_targeted_questions_q'] and session['symptoms_confirmed_count'] < (MIN_SYMPTOMS_FOR_PREDICTION + 1): 
                     session['current_targeted_symptom_key'] = session['symptoms_targeted_questions_q'].pop(0)
                     ask_phrase = MODEL_KEY_TO_ASK_PHRASE.get(session['current_targeted_symptom_key'], f"And how about {session['current_targeted_symptom_key'].replace('_',' ')}?")
                     bot_responses.append(ask_phrase + " (yes/no)")
-                else:
+                elif session['symptoms_confirmed_count'] < MIN_SYMPTOMS_FOR_PREDICTION and not session['symptoms_targeted_questions_q']:
+                    # Still not enough symptoms, and ran out of targeted questions
+                    bot_responses.append(user_name_greet + "I still need a bit more information. Can you think of any other symptoms you're experiencing?")
+                    session['state'] = 'AWAITING_INITIAL_SYMPTOMS' # Go back to general symptom gathering
+                else: # Either enough symptoms or ran out of questions but met minimum
                     bot_responses.append(user_name_greet + "Thank you. Just a couple of routine questions. What is your age?")
                     session['state'] = 'AWAITING_AGE'
             else: # Invalid yes/no
@@ -524,7 +520,7 @@ def chat_api():
 
         elif current_state == 'AWAITING_AGE':
             try:
-                age_match = re.search(r'\d+', user_message) # Find first number
+                age_match = re.search(r'\d+', user_message)
                 if age_match:
                     age = int(age_match.group(0))
                     if 0 < age < 120:
@@ -544,48 +540,26 @@ def chat_api():
             if sex_val:
                 session['sex'] = sex_val
                 bot_responses.append(user_name_greet + f"{sex_val} recorded. Thank you. I'll analyze your symptoms now...")
-                session['state'] = 'READY_TO_PREDICT'
+                session['state'] = 'READY_TO_PREDICT' # Transition to prediction
             else:
                 bot_responses.append(user_name_greet + "Please specify Male, Female, or you can say 'Prefer not to say'.")
         
-        # Prediction State (can be entered directly if enough symptoms and demographics gathered)
-        if session['state'] == 'READY_TO_PREDICT':
-            if session['symptoms_confirmed_count'] < 1: # Needs at least one symptom
+        # PREDICTION STATE (can be entered directly if enough symptoms and demographics gathered)
+        if session['state'] == 'READY_TO_PREDICT': # Note: This check should be AFTER age/sex if they are mandatory
+            if session['symptoms_confirmed_count'] < 1 : # Or your MIN_SYMPTOMS_FOR_PREDICTION
                 bot_responses.append(user_name_greet + "I don't seem to have enough symptom information to make an analysis. Could we start over by you telling me your main symptoms?")
                 session['state'] = 'AWAITING_INITIAL_SYMPTOMS'
+            elif session['age'] is None or session['sex'] is None: # Ensure demographics are gathered
+                if session['age'] is None:
+                    bot_responses.append(user_name_greet + "Before I proceed, what is your age?")
+                    session['state'] = 'AWAITING_AGE'
+                elif session['sex'] is None:
+                    bot_responses.append(user_name_greet + "And your biological sex? (Male/Female/Prefer not to say)")
+                    session['state'] = 'AWAITING_SEX'
             else:
                 app.logger.info(f"Predicting for vector: {session['symptoms_vector']}")
                 input_df = pd.DataFrame([session['symptoms_vector']])
-                
-                 # --- START OF HACKY WORKAROUND ---
-                # Define the specific known mismatches
-                mismatched_to_expected = {
-                    "dischromic__patches": "dischromic _patches",
-                    "foul_smell_of_urine": "foul_smell_of urine", # If double underscore became single
-                    "spotting__urination": "spotting_ urination"
-                    # Add other specific known errors if they arise, e.g.
-                    # "foul_smell_of_urine": "foul_smell_of urine" # If model expects space, but you generate underscore
-                }
-                
-                current_columns = list(input_df.columns)
-                new_columns = []
-                renamed_cols_log = {}
-
-                for col_name in current_columns:
-                    if col_name in mismatched_to_expected:
-                        expected_name = mismatched_to_expected[col_name]
-                        new_columns.append(expected_name)
-                        if col_name != expected_name:
-                            renamed_cols_log[col_name] = expected_name
-                    else:
-                        new_columns.append(col_name)
-                
-                if renamed_cols_log:
-                    app.logger.warning(f"HACK APPLIED: Renaming input_df columns for prediction: {renamed_cols_log}")
-                    input_df.columns = new_columns
-                # --- END OF HACKY WORKAROUND ---
-
-                input_df = input_df[MODEL_SYMPTOM_KEYS]
+                input_df = input_df[MODEL_SYMPTOM_KEYS] # Ensure correct column order
                 
                 pred_proba = model.predict_proba(input_df)[0]
                 pred_idx = np.argmax(pred_proba)
@@ -615,36 +589,77 @@ def chat_api():
         elif current_state == 'AWAITING_DOCTOR_CONFIRMATION':
             disease_context = session['predicted_disease_context']
             responded_to_doc_q = False
+            doctors_for_map_list = [] # NEW: List to hold doctor data for mapping
+
             if "yes" in user_message and disease_context:
                 norm_disease_key = normalize_text(disease_context)
                 target_spec_from_map = disease_to_specialization_map.get(norm_disease_key)
                 
                 found_docs_messages = [f"I'm sorry, {session['user_name']}, I couldn't immediately find doctors specifically listed for '{disease_context.title()}' or its related specialty in my current database."]
+                
                 if target_spec_from_map and not doctors_df.empty:
-                    # Search for doctors whose 'speciality' string CONTAINS the target specialization (case-insensitive)
-                    relevant_docs = doctors_df[doctors_df['speciality'].str.contains(target_spec_from_map, case=False, na=False)]
-                    if not relevant_docs.empty:
-                        found_docs_messages = [f"For a condition like **{disease_context.title()}**, you would typically consult a **{target_spec_from_map}**. Here are a few doctors listed with that or a similar specialty in Bangladesh:"]
-                        for i, (_, doc) in enumerate(relevant_docs.head(3).iterrows()): # Show top 3
-                            doc_name = doc.get('name', 'N/A')
-                            doc_spec = doc.get('speciality', 'N/A')
-                            doc_hosp = doc.get('hospital_name', 'N/A')
-                            doc_addr = doc.get('address', 'N/A')
-                            doc_contact = doc.get('number', 'N/A')
-                            doc_img = doc.get('image_source', 'https_via.placeholder.com/80') # Default placeholder
+                    relevant_docs_df = doctors_df[
+                        doctors_df['speciality'].str.contains(target_spec_from_map, case=False, na=False) &
+                        doctors_df['latitude'].notna() &  # Ensure lat/lon are present
+                        doctors_df['longitude'].notna()
+                    ]
+                    
+                    if not relevant_docs_df.empty:
+                        found_docs_messages = [f"For a condition like **{disease_context.title()}**, you would typically consult a **{target_spec_from_map}**. Here are a few doctors listed with that or a similar specialty in Bangladesh. I can also show them on a map."]
+                        
+                        # Get column names dynamically after cleaning
+                        name_col = 'name' # default, adjust if your actual cleaned name is different
+                        spec_col = 'speciality'
+                        hosp_col = 'hospital_name'
+                        addr_col = 'address'
+                        num_col = 'number'
+                        img_col = 'image_source'
+                        lat_col = 'latitude'
+                        lon_col = 'longitude'
 
-                            doc_info = (f"<div style='border:1px solid #eee; padding:10px; margin-bottom:10px; border-radius:5px;'>"
+
+                        for i, (_, doc) in enumerate(relevant_docs_df.head(3).iterrows()):
+                            doc_name = doc.get(name_col, 'N/A')
+                            doc_spec = doc.get(spec_col, 'N/A')
+                            doc_hosp = doc.get(hosp_col, 'N/A')
+                            doc_addr = doc.get(addr_col, 'N/A')
+                            doc_contact = doc.get(num_col, 'N/A')
+                            doc_img = doc.get(img_col, 'https_via.placeholder.com/80')
+                            doc_lat = doc.get(lat_col) # Already numeric or NaN
+                            doc_lon = doc.get(lon_col) # Already numeric or NaN
+
+                            doc_info_html = (f"<div style='border:1px solid #eee; padding:10px; margin-bottom:10px; border-radius:5px;'>"
                                         f"<img src='{doc_img}' alt='{doc_name}' style='width:60px; height:60px; border-radius:50%; float:left; margin-right:10px; object-fit:cover;'>"
                                         f"<strong>{i+1}. {doc_name}</strong><br>"
                                         f"<em>{doc_spec}</em><br>"
                                         f"🏥 {doc_hosp}<br>"
                                         f"📍 <small>{doc_addr}</small><br>"
-                                        f"{'📞 '+doc_contact if pd.notna(doc_contact) else ''}"
+                                        f"{'📞 '+str(doc_contact) if pd.notna(doc_contact) else ''}" # Ensure contact is string
                                         f"<div style='clear:both;'></div></div>")
-                            found_docs_messages.append(doc_info)
+                            found_docs_messages.append(doc_info_html)
+
+                            # Add to list for mapping if lat/lon are valid
+                            if pd.notna(doc_lat) and pd.notna(doc_lon):
+                                doctors_for_map_list.append({
+                                    "name": doc_name,
+                                    "speciality": doc_spec,
+                                    "hospital": doc_hosp,
+                                    "address": doc_addr,
+                                    "contact": str(doc_contact) if pd.notna(doc_contact) else 'N/A',
+                                    "lat": doc_lat,
+                                    "lng": doc_lon,
+                                    "image": doc_img
+                                })
+                        
+                        if doctors_for_map_list:
+                             map_data_for_frontend = {"doctors": doctors_for_map_list} # Prepare for JSON
+                             found_docs_messages.append("Check the map display for their locations.")
+                        else:
+                            found_docs_messages.append("I found some doctors, but unfortunately, I don't have location data for them to display on a map.")
+                        
                         found_docs_messages.append("It's always best to call ahead to confirm availability and suitability.")
-                    else: # No doctors found with that specific specialty string
-                        found_docs_messages = [f"While a **{target_spec_from_map}** would be suitable for **{disease_context.title()}**, I don't have specific doctors listed under that exact specialty title in my current BD database. You may need to search more broadly or consult a general physician for a referral."]
+                    else:
+                        found_docs_messages = [f"While a **{target_spec_from_map}** would be suitable for **{disease_context.title()}**, I don't have specific doctors listed under that exact specialty title with location data in my current BD database. You may need to search more broadly or consult a general physician for a referral."]
 
                 bot_responses.extend(found_docs_messages)
                 responded_to_doc_q = True
@@ -654,28 +669,34 @@ def chat_api():
             
             if responded_to_doc_q:
                 bot_responses.append("\nIs there anything else I can help you with today?")
-                session = reset_session_for_new_query(user_id, session['user_name']) # Reset, keeping name
-                current_state = session['state'] # Update current_state
-            else: # Did not say yes or no
+                session = reset_session_for_new_query(user_id, session['user_name'])
+                current_state = session['state']
+            else:
                 bot_responses.append("Please answer 'yes' or 'no' regarding the doctor search.")
-    
-    if not bot_responses: # Fallback if no state logic produced a response
+
+    if not bot_responses:
         greeting = f"{session.get('user_name', 'there')}, " if session.get('user_name') else ""
         bot_responses.append(f"I'm sorry, {greeting}I'm not sure how to respond to that. You can tell me your symptoms, or type 'reset' to start over.")
 
     app.logger.info(f"BOT for {user_id} (Name: {session.get('user_name')}): {bot_responses}")
-    return jsonify({'bot_response_parts': bot_responses, 'user_id': user_id})
+    
+    # Construct the final JSON response
+    json_response = {'bot_response_parts': bot_responses, 'user_id': user_id}
+    if map_data_for_frontend:
+        json_response['map_data'] = map_data_for_frontend # Add map data if available
+        app.logger.info(f"Sending map data: {map_data_for_frontend}")
+
+
+    return jsonify(json_response)
 
 
 if __name__ == '__main__':
     if not model or not MODEL_SYMPTOM_KEYS:
         print("="*80)
         print("ERROR: MODEL OR SYMPTOM KEYS NOT LOADED. FLASK APP CANNOT RUN CORRECTLY.")
-        print("1. Ensure 'model_training.py' created .pkl files in 'models/' folder.")
-        print("2. Ensure 'symptom_columns.pkl' (used for MODEL_SYMPTOM_KEYS) is correct.")
-        print("3. Check paths to data files (CSVs) at the top of app.py.")
-        print("4. CRITICAL: Populate the SYMPTOM_MAP dictionary in app.py thoroughly!")
+        # ... (rest of your error messages)
         print("="*80)
+
     else:
         app.logger.info("Flask app starting... Model and initial data loaded.")
-        app.run(debug=True, port=5002, use_reloader=True) # use_reloader=True for dev convenience
+        app.run(debug=True, port=5002, use_reloader=True)
